@@ -1,0 +1,378 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Virtual Wiring Prototype</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.7.0/p5.js"></script>
+    
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+            background-color: #D2B48C; 
+            background-image: radial-gradient(#8B4513 15%, transparent 16%);
+            background-size: 20px 20px;
+        }
+
+        #ui-container {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            z-index: 10;
+            display: flex;
+            gap: 10px;
+        }
+
+        button, .button-label {
+            padding: 10px 15px;
+            font-size: 16px;
+            cursor: pointer;
+            border: 2px solid #333;
+            background-color: #f4f4f4;
+            border-radius: 5px;
+            font-family: sans-serif;
+            display: flex; 
+            align-items: center; 
+            justify-content: center;
+        }
+
+        button.active {
+            background-color: #a0c4ff;
+            border-color: #0050d1;
+        }
+
+        #place-marker-btn {
+            padding: 15px 25px;
+            font-size: 18px;
+            font-weight: bold;
+        }
+    </style>
+</head>
+<body>
+    <div id="ui-container">
+        <button id="add-wire-btn">+ New Wire</button>
+        <button id="place-marker-btn">📌 Place Marker</button>
+        <button id="save-btn">💾 Save</button>
+        <label for="load-input" class="button-label">📂 Load</label>
+        <input type="file" id="load-input" accept=".json" style="display: none;">
+    </div>
+    
+    <script>
+        const gridSize = 20;
+        let holes = new Map();
+        let wires = [];
+        let currentWire = null;
+        let wireColors = ['#e6194B', '#3cb44b', '#4363d8', '#f58231', '#911eb4', '#42d4f4', '#f032e6', '#bfef45', '#fabed4', '#469990'];
+        let colorIndex = 0;
+        let highlightedWire = null;
+        let placingMarker = false;
+
+
+        let addWireBtn, placeMarkerBtn, saveBtn, loadInput;
+
+        function setup() {
+            createCanvas(windowWidth, windowHeight);
+            createHoles();
+
+
+            addWireBtn = document.getElementById('add-wire-btn');
+            placeMarkerBtn = document.getElementById('place-marker-btn');
+            saveBtn = document.getElementById('save-btn');
+            loadInput = document.getElementById('load-input');
+
+            addWireBtn.addEventListener('click', () => {
+                placingMarker = false;
+                placeMarkerBtn.classList.remove('active');
+                currentWire = new Wire(wireColors[colorIndex]);
+                wires.push(currentWire);
+                colorIndex = (colorIndex + 1) % wireColors.length;
+            });
+
+            placeMarkerBtn.addEventListener('click', () => {
+                placingMarker = !placingMarker;
+                currentWire = null;
+                placeMarkerBtn.classList.toggle('active', placingMarker);
+            });
+
+            saveBtn.addEventListener('click', saveState);
+            loadInput.addEventListener('change', loadState);
+        }
+
+        function draw() {
+            background('#D2B48C');
+            drawHoles();
+
+            highlightedWire = null;
+            for (const wire of wires) {
+                if (wire.isMouseOver()) {
+                    highlightedWire = wire;
+                }
+            }
+
+            for (const wire of wires) {
+                wire.draw();
+            }
+        }
+
+        function mousePressed() {
+            const clickedHole = getHoleAt(mouseX, mouseY);
+            if (!clickedHole) return;
+
+            if (placingMarker) {
+                clickedHole.isMarker = !clickedHole.isMarker;
+            } else if (currentWire) {
+                currentWire.addPoint(clickedHole);
+            } else {
+                clickedHole.isComponent = !clickedHole.isComponent;
+            }
+        }
+
+        function doubleClicked() {
+            const clickedHole = getHoleAt(mouseX, mouseY);
+            if (clickedHole && clickedHole.isMarker) {
+                clickedHole.isMarker = false;
+                return;
+            }
+            if (highlightedWire) {
+                wires = wires.filter(w => w !== highlightedWire);
+                highlightedWire = null;
+            }
+        }
+
+        function windowResized() {
+            resizeCanvas(windowWidth, windowHeight);
+            createHoles();
+        }
+
+        function createHoles() {
+            const oldHoles = new Map(holes);
+            holes.clear();
+            for (let x = gridSize; x < width; x += gridSize) {
+                for (let y = gridSize; y < height; y += gridSize) {
+                    const key = `${x},${y}`;
+                    const oldHole = oldHoles.get(key);
+                    holes.set(key, {
+                        x,
+                        y,
+                        isComponent: oldHole?.isComponent || false,
+                        isMarker: oldHole?.isMarker || false
+                    });
+                }
+            }
+        }
+
+        function drawHoles() {
+            for (const hole of holes.values()) {
+                stroke('#8B4513');
+                strokeWeight(1);
+
+                if (hole.isMarker) {
+                    fill('#FFD700');
+                    ellipse(hole.x, hole.y, 12, 12);
+                } else if (hole.isComponent) {
+                    fill('#000');
+                    ellipse(hole.x, hole.y, 5, 5);
+                } else {
+                    fill('#8B4513');
+                    ellipse(hole.x, hole.y, 3, 3);
+                }
+            }
+        }
+
+        function getHoleAt(x, y) {
+            const snappedX = round(x / gridSize) * gridSize;
+            const snappedY = round(y / gridSize) * gridSize;
+            return holes.get(`${snappedX},${snappedY}`);
+        }
+
+
+
+        function saveState() {
+            const state = {
+                holes: [],
+                wires: []
+            };
+
+            for (const hole of holes.values()) {
+                if (hole.isComponent || hole.isMarker) {
+                    state.holes.push({
+                        x: hole.x,
+                        y: hole.y,
+                        isComponent: hole.isComponent,
+                        isMarker: hole.isMarker
+                    });
+                }
+            }
+
+            state.wires = wires.map(wire => ({
+                color: wire.color,
+                points: wire.points.map(p => ({ x: p.x, y: p.y }))
+            }));
+            
+            saveJSON(state, 'breadboard-layout.json');
+        }
+
+        function loadState(event) {
+            const file = event.target.files[0];
+            if (!file) {
+                return;
+            }
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                const state = JSON.parse(e.target.result);
+
+                createHoles();
+                wires = [];
+                currentWire = null;
+                colorIndex = 0;
+
+                state.holes.forEach(savedHole => {
+                    const key = `${savedHole.x},${savedHole.y}`;
+                    if (holes.has(key)) {
+                        const hole = holes.get(key);
+                        hole.isComponent = savedHole.isComponent;
+                        hole.isMarker = savedHole.isMarker;
+                    }
+                });
+
+                state.wires.forEach(savedWire => {
+                    const newWire = new Wire(savedWire.color);
+                    savedWire.points.forEach(p => {
+                        const hole = getHoleAt(p.x, p.y);
+                        if (hole) {
+                            newWire.addPoint(hole);
+                        }
+                    });
+                    wires.push(newWire);
+                });
+                
+                if (wires.length > 0) {
+                   const lastColor = wires[wires.length - 1].color;
+                   const lastColorIndex = wireColors.indexOf(lastColor);
+                   if (lastColorIndex !== -1) {
+                       colorIndex = (lastColorIndex + 1) % wireColors.length;
+                   }
+                }
+            };
+            reader.readAsText(file);
+            
+            event.target.value = '';
+        }
+
+
+      
+
+        class Wire {
+            constructor(color) {
+                this.points = [];
+                this.color = color;
+            }
+
+
+
+            addPoint(point) {
+                const lastPoint = this.points[this.points.length - 1];
+                if (this.points.length > 0) {
+                    if (point.x !== lastPoint.x && point.y !== lastPoint.y) {
+                        return;
+                    }
+                }
+                this.points.push(point);
+            }
+
+            isMouseOver() {
+                if (this.points.length < 2) return false;
+                for (let i = 0; i < this.points.length - 1; i++) {
+                    const p1 = this.points[i];
+                    const p2 = this.points[i + 1];
+                    const d = distToSegment(createVector(mouseX, mouseY), createVector(p1.x, p1.y), createVector(p2.x, p2.y));
+                    if (d < 5) return true;
+                }
+                return false;
+            }
+
+            draw() {
+                if (this.points.length < 2) return;
+
+                const isHighlighted = (this === highlightedWire);
+                stroke(this.color);
+                strokeWeight(isHighlighted ? 6 : 4);
+                noFill();
+
+                for (let i = 0; i < this.points.length - 1; i++) {
+                    let p1 = this.points[i];
+                    let p2 = this.points[i + 1];
+
+                    let intersections = [];
+                    for (const otherWire of wires) {
+                        if (otherWire === this) continue;
+                        for (let j = 0; j < otherWire.points.length - 1; j++) {
+                            const op1 = otherWire.points[j];
+                            const op2 = otherWire.points[j + 1];
+                            const intersection = checkLineIntersection(p1.x, p1.y, p2.x, p2.y, op1.x, op1.y, op2.x, op2.y);
+                            if (intersection) {
+                                intersections.push({ ...intersection,
+                                    isParallel: (p1.x === p2.x && op1.x === op2.x) || (p1.y === p2.y && op1.y === op2.y)
+                                });
+                            }
+                        }
+                    }
+
+                    const validIntersections = intersections.filter(item => !item.isParallel);
+
+                    if (validIntersections.length === 0) {
+                        line(p1.x, p1.y, p2.x, p2.y);
+                    } else {
+                        validIntersections.sort((a, b) => dist(p1.x, p1.y, a.x, a.y) - dist(p1.x, p1.y, b.x, b.y));
+
+                        let lastPoint = p1;
+                        for (const intersect of validIntersections) {
+                            line(lastPoint.x, lastPoint.y, intersect.x, intersect.y);
+
+                            push();
+                            translate(intersect.x, intersect.y);
+                            let angle = atan2(p2.y - p1.y, p2.x - p1.x);
+                            rotate(angle);
+                            noFill();
+                            stroke(this.color);
+                            strokeWeight(isHighlighted ? 6 : 4);
+                            arc(0, 0, 10, 10, PI, 0);
+                            pop();
+
+                            lastPoint = intersect;
+                        }
+                        line(lastPoint.x, lastPoint.y, p2.x, p2.y);
+                    }
+                }
+            }
+        }
+
+        function distToSegment(p, v, w) {
+            const l2 = dist(v.x, v.y, w.x, w.y) ** 2;
+            if (l2 === 0) return dist(p.x, p.y, v.x, v.y);
+            let t = ((p.x - v.x) * (w.x - v.x) + (p.y - v.y) * (w.y - v.y)) / l2;
+            t = max(0, min(1, t));
+            const projection = createVector(v.x + t * (w.x - v.x), v.y + t * (w.y - v.y));
+            return dist(p.x, p.y, projection.x, projection.y);
+        }
+
+        function checkLineIntersection(x1, y1, x2, y2, x3, y3, x4, y4) {
+            const den = (x1 - x2) * (y3 - y4) - (y1 - y2) * (x3 - x4);
+            if (den === 0) return null;
+
+            const t = ((x1 - x3) * (y3 - y4) - (y1 - y3) * (x3 - x4)) / den;
+            const u = -((x1 - x2) * (y1 - y3) - (y1 - y2) * (x1 - x3)) / den;
+
+            if (t > 0.01 && t < 0.99 && u > 0.01 && u < 0.99) {
+                return {
+                    x: x1 + t * (x2 - x1),
+                    y: y1 + t * (y2 - y1)
+                };
+            }
+            return null;
+        }
+    </script>
+</body>
+</html>
